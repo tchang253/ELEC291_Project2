@@ -1,22 +1,16 @@
-// motor.c: Uses timer 2 PWM channels to control two H-bridge motor drivers.
-// Adapted from the TimerPWM example
-// We use 4 channels of TIM2 for 2 motors (2 channels each: fwd + rev).
-
-#include "motor.h"
-#include "Common/Include/stm32l051xx.h"
-
-#define SYSCLK 32000000L
-
-// LQFP32 pinout
+// motor.c
+// Controls the two main drive motors using TIM2 PWM.
+//
+// LQFP32 Pinout Diagram
 //             ----------
 //       VDD -|1       32|- VSS
 //      PC14 -|2       31|- BOOT0
-//      PC15 -|3       30|- PB7  (I2C1_SDA) ** RESERVED for VL53L0X **
-//      NRST -|4       29|- PB6  (I2C1_SCL) ** RESERVED for VL53L0X **
+//      PC15 -|3       30|- PB7  (RESERVED for VL53L0X I2C1_SDA)
+//      NRST -|4       29|- PB6  (RESERVED for VL53L0X I2C1_SCL)
 //      VDDA -|5       28|- PB5
 //       PA0 -|6       27|- PB4
-//       PA1 -|7       26|- PB3  < LEFT MOTOR REVERSE (TIM2_CH2, AF2)
-// (R_FWD)PA2 -|8       25|- PA15 < LEFT MOTOR FORWARD (TIM2_CH1, AF5)
+//       PA1 -|7       26|- PB3  < L_REV (TIM2_CH2, AF2)
+// (R_FWD)PA2 -|8       25|- PA15 < L_FWD (TIM2_CH1, AF5)
 // (R_REV)PA3 -|9       24|- PA14
 //       PA4 -|10      23|- PA13
 //       PA5 -|11      22|- PA12
@@ -27,14 +21,34 @@
 //       VSS -|16      17|- VDD
 //             ----------
 //
-// Current motor pin assignments:
-//   Left Motor FWD  = PA15 -> TIM2_CH1 (AF5)
-//   Left Motor REV  = PB3  -> TIM2_CH2 (AF2)
-//   Right Motor FWD = PA2  -> TIM2_CH3 (AF2)  ** TODO: hardware team confirm **
-//   Right Motor REV = PA3  -> TIM2_CH4 (AF2)  ** TODO: hardware team confirm **
+// Pin Summary:
+// Left Motor FWD  -> PA15 (Pin 25) [TIM2_CH1 / AF5]
+// Left Motor REV  -> PB3  (Pin 26) [TIM2_CH2 / AF2]
+// Right Motor FWD -> PA2  (Pin 8)  [TIM2_CH3 / AF2] - double check these pins
+// on the actual board! Right Motor REV -> PA3  (Pin 9)  [TIM2_CH4 / AF2]
 //
-// NOTE: if you need to change pins, make sure the new pin has a TIM2
-// alternate function.
+// Hardware Notes for the team:
+// - We use 2 PWM signals per motor. Wire the FWD signal to the left half-bridge
+// gates,
+//   and the REV signal to the right half-bridge gates (matches the 2026 lecture
+//   slides).
+//
+// - Motor_Stop() sets both inputs to 0. This turns on both bottom MOSFETs,
+// connecting
+//   both motor terminals directly to ground. This safely dissipates the motor's
+//   energy and gives us a hard electronic brake (which helps us stop exactly on
+//   intersections).
+//
+// - CAUTION: Setting both FWD and REV high at the same time causes
+// "shoot-through".
+//   This creates a direct short from VCC to Ground and will destroy the
+//   H-bridge. However, our software specifically prevents this in Motor_Left()
+//   and Motor_Right() by forcing one channel to 0 whenever the other is active.
+
+#include "motor.h"
+#include "Common/Include/stm32l051xx.h"
+
+#define SYSCLK 32000000L
 
 void Motor_Init(void) {
   RCC->IOPENR |= BIT0 | BIT1; // peripheral clock enable for port A and B
@@ -65,12 +79,20 @@ void Motor_Init(void) {
   GPIOA->MODER = (GPIOA->MODER & ~(BIT6)) | BIT7; // AF-Mode
   GPIOA->AFR[0] |= BIT13;                         // AF2 (0010)
 
-  // Set up TIM2 for PWM (same approach as TimerPWM example)
-  TIM2->ARR = 100;   // period=100 so duty maps to 0-100%
-  TIM2->CR1 |= BIT7; // ARPE enable
-  TIM2->CR1 |= BIT0; // enable counting
+  // Timer 2 setup
+  // We are using a prescaler of 319 to drop the PWM frequency down to ~1kHz.
+  // This is SUPER IMPORTANT. The LTV-847 optocouplers we're using take 5-10us
+  // to turn off. When we ran this at 20kHz earlier, they couldn't switch fast
+  // enough, causing shoot-through that fried the MOSFETs. Keep this at ~1kHz to
+  // be safe.
+  TIM2->PSC = 319;
+  TIM2->ARR = 100;   // period=100 so duty cycle maps cleanly from 0-100%
+  TIM2->CR1 |= BIT7; // auto-reload preload enable
+  TIM2->CR1 |= BIT0; // enable the counter
 
   // Enable PWM mode 1 on all 4 channels ([6..4]=110, OC preload)
+  // We're upcounting now. CCR=0 means 0% duty cycle (OFF), CCR=100 means full
+  // speed.
   TIM2->CCMR1 |= BIT6 | BIT5;   // CH1 PWM mode 1
   TIM2->CCMR1 |= BIT3;          // OC1PE
   TIM2->CCMR1 |= BIT14 | BIT13; // CH2 PWM mode 1
@@ -131,10 +153,3 @@ void Motor_Stop(void) {
   Motor_Right(0);
 }
 
-// Electronic brake: short both motor terminals to gnd via FETs
-void Motor_Brake(void) {
-  TIM2->CCR1 = 0;
-  TIM2->CCR2 = 100;
-  TIM2->CCR3 = 0;
-  TIM2->CCR4 = 100;
-}
