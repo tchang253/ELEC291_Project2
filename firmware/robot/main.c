@@ -7,7 +7,7 @@
 #define START_KP 1.5f   // Start small, increase until it wiggles
 #define START_KI 0.0f   // Keep at 0 for initial testing
 #define START_KD 0.2f   // Increase to stop the wiggling
-#define BASE_SPEED 40   // 0-100% duty cycle
+#define BASE_SPEED 50  // 0-100% duty cycle
 
 // --- ADC CHANNELS (Based on LQFP32 Pinout) ---
 #define CH_LEFT   0     // PA0 (Pin 6)
@@ -43,8 +43,8 @@ int main(void) {
         float adjustment = pid_calc(&steering_pid, current_state.robot_error);
         
         // D. ACT: Adjust PWM duty cycles (0-100 range)
-        int left_speed  = BASE_SPEED + (int)adjustment;
-        int right_speed = BASE_SPEED - (int)adjustment;
+        int left_speed  = BASE_SPEED - (int)adjustment;
+        int right_speed = BASE_SPEED + (int)adjustment;
         
         Motor_Left(left_speed);
         Motor_Right(right_speed);
