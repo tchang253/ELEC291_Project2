@@ -1,0 +1,11 @@
+# Build artifacts (recreated by 'make')
+*.o
+*.elf
+*.hex
+*.map
+*.bin
+*.lst
+
+# Local batch files (contain YOUR COM port)
+loadf.bat
+loadf_cody.bat

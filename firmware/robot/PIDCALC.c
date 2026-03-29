@@ -1,7 +1,7 @@
 #include "PIDCALC.h"
 
 
-void pid_init(pid_t* pid, float kp, float ki, float kd){
+void pid_init(pid_ctrl_t* pid, float kp, float ki, float kd){
     //initialize the pid to inputted values(tested)
     pid->Kp = kp;
     pid->Ki = ki;
@@ -11,7 +11,7 @@ void pid_init(pid_t* pid, float kp, float ki, float kd){
     pid->integral = 0.0f;
 }
 
-float pid_calc(pid_t* pid, float error){
+float pid_calc(pid_ctrl_t* pid, float error){
     float P;//proportional kp*error
     float derivative;//error - prev.error
 

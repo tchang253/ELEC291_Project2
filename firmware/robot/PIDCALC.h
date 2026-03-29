@@ -8,13 +8,13 @@ typedef struct{
     float Kd; // Derivative gain
     float previous_error; // Previous error for derivative calculation
     float integral; // Integral of the error for integral calculation
-}pid_t;
+}pid_ctrl_t;
 
 //function prototype for pid initialization, we will set the initial values of the pid gains, and prev error and integral to 0
-void pid_init(pid_t* pid, float kp, float ki, float kd);
+void pid_init(pid_ctrl_t* pid, float kp, float ki, float kd);
 
 //pid calculation
-float pid_calc(pid_t* pid, float error);
+float pid_calc(pid_ctrl_t* pid, float error);
 
 
 #endif
