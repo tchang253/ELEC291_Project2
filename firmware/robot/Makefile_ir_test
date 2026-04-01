@@ -29,7 +29,8 @@ serial.o: Common/Source/serial.c
 newlib_stubs.o: Common/Source/newlib_stubs.c
 	$(CC) -c $(CCFLAGS) Common/Source/newlib_stubs.c -o newlib_stubs.o
 
-PORT ?= COM6
+# Automatically locate the COM port if not specified
+PORT ?= $(shell powershell -noprofile -command "[System.IO.Ports.SerialPort]::getportnames() | Select-Object -First 1")
 
 clean: 
 	@del $(OBJS) 2>NUL

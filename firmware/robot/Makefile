@@ -5,11 +5,10 @@ LD=arm-none-eabi-ld
 CCFLAGS=-mcpu=cortex-m0 -mthumb -g 
 
 # =====================================================
-# CHANGE THIS to your COM port (e.g. make flash PORT=COM4)
+# Automatically locate the COM port if not specified
+# (e.g. you can still override with: make flash PORT=COM4)
 # =====================================================
-PORT ?= COM6
-
-# Search for the path of the right libraries. Works only on Windows.
+PORT ?= $(shell powershell -noprofile -command "[System.IO.Ports.SerialPort]::getportnames() | Select-Object -First 1")
 GCCPATH=$(subst \bin\arm-none-eabi-gcc.exe,\,$(shell where $(CC)))
 LIBPATH1=$(subst \libgcc.a,,$(shell dir /s /b "$(GCCPATH)*libgcc.a" | find "v6-m"))
 LIBPATH2=$(subst \libc_nano.a,,$(shell dir /s /b "$(GCCPATH)*libc_nano.a" | find "v6-m"))
