@@ -2,23 +2,44 @@ import cv2
 import mediapipe as mp
 import time
 import serial
+import serial.tools.list_ports
 import os
 
-# -------- SERIAL CONFIG --------
-PORT = 'COM8'  # <--- Change this if your FTDI cable moves to a different port
-BAUD = 115200
+# --- Auto COM Port Detection ---
+# Detects Silicon Labs (EFM8 built-in) or FTDI (external adapter)
+def find_efm8_port():
+    ports = serial.tools.list_ports.comports()
+    if not ports:
+        return None
+    
+    # Priority 1: Match known Vendor IDs (Silicon Labs=0x10C4, FTDI=0x0403)
+    for p in ports:
+        if p.vid in [0x10C4, 0x0403]:
+            return p.device
+            
+    # Priority 2: Fallback to name search
+    for p in ports:
+        if p.description and ('CP210' in p.description or 'FTDI' in p.description or 'USB Serial' in p.description):
+            return p.device
+            
+    # Priority 3: Last resort - pick the very first COM port if one is plugged in
+    return ports[0].device
 
 try:
+    port = find_efm8_port()
+    if port is None:
+        raise IOError("No USB COM ports found! Is the USB cable plugged in?")
+        
     ser = serial.Serial()
-    ser.port = PORT
-    ser.baudrate = BAUD
+    ser.port = port
+    ser.baudrate = 115200
     ser.dtr = False   # Prevents reset loop
     ser.rts = False
     ser.open()
-    print(f"[CV Bridge] Successfully connected to {PORT} at {BAUD} baud.")
+    print(f"[CV Bridge] Auto-detected EFM8 Bridge on {port} at 115200 baud.")
 except Exception as e:
     ser = None
-    print(f"[CV Bridge] WARNING: Could not connect to {PORT}: {e}\n  --> Running in camera-only test mode.", flush=True)
+    print(f"[CV Bridge] WARNING: Could not connect: {e}\n  --> Running in camera-only test mode.", flush=True)
 
 # --- MediaPipe Setup ---
 model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hand_landmarker.task')
