@@ -29,9 +29,11 @@ serial.o: Common/Source/serial.c
 newlib_stubs.o: Common/Source/newlib_stubs.c
 	$(CC) -c $(CCFLAGS) Common/Source/newlib_stubs.c -o newlib_stubs.o
 
+PORT ?= COM6
+
 clean: 
 	@del $(OBJS) 2>NUL
 	@del ir_test.elf ir_test.hex ir_test.map 2>NUL
 
 flash: ir_test.elf
-	..\STM32L051\stm32flash\stm32flash -w ir_test.hex -v -g 0x0 COM5
+	tools\stm32flash -w ir_test.hex -v -g 0x0 $(PORT)
