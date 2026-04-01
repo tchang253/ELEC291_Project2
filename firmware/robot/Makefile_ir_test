@@ -1,0 +1,37 @@
+SHELL=cmd
+CC=arm-none-eabi-gcc
+AS=arm-none-eabi-as
+LD=arm-none-eabi-ld
+CCFLAGS=-mcpu=cortex-m0 -mthumb -g 
+
+# Search for the path of the right libraries.  Works only on Windows.
+GCCPATH=$(subst \bin\arm-none-eabi-gcc.exe,\,$(shell where $(CC)))
+LIBPATH1=$(subst \libgcc.a,,$(shell dir /s /b "$(GCCPATH)*libgcc.a" | find "v6-m"))
+LIBPATH2=$(subst \libc_nano.a,,$(shell dir /s /b "$(GCCPATH)*libc_nano.a" | find "v6-m"))
+LIBSPEC=-L"$(LIBPATH1)" -L"$(LIBPATH2)"
+
+OBJS=ir_test.o startup.o serial.o newlib_stubs.o
+
+ir_test.elf : $(OBJS)
+	$(LD) $(OBJS) $(LIBSPEC) -Os -nostdlib -lnosys -lgcc -T Common/LDscripts/stm32l051xx.ld --cref -Map ir_test.map -o ir_test.elf
+	arm-none-eabi-objcopy -O ihex ir_test.elf ir_test.hex
+	@echo Success!
+
+ir_test.o: ir_test.c
+	$(CC) -c $(CCFLAGS) ir_test.c -o ir_test.o
+
+startup.o: Common/Source/startup.c
+	$(CC) -c $(CCFLAGS) -DUSE_USART1 Common/Source/startup.c -o startup.o
+
+serial.o: Common/Source/serial.c
+	$(CC) -c $(CCFLAGS) Common/Source/serial.c -o serial.o
+
+newlib_stubs.o: Common/Source/newlib_stubs.c
+	$(CC) -c $(CCFLAGS) Common/Source/newlib_stubs.c -o newlib_stubs.o
+
+clean: 
+	@del $(OBJS) 2>NUL
+	@del ir_test.elf ir_test.hex ir_test.map 2>NUL
+
+flash: ir_test.elf
+	..\STM32L051\stm32flash\stm32flash -w ir_test.hex -v -g 0x0 COM5

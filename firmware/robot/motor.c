@@ -1,5 +1,10 @@
 // motor.c
-// Controls the two main drive motors using TIM2 PWM.
+// Controls the two main drive motors.
+// LEFT motor  uses TIM2  (PA15=FWD/CH1/AF5, PB3=REV/CH2/AF2)
+// RIGHT motor uses TIM22 (PA6=FWD/CH1/AF5,  PA7=REV/CH2/AF5)
+//
+// PA2 and PA3 are reserved for Bluetooth USART2 (TX/RX).
+// PB0 and PB1 have NO timer support on STM32L051 — do not use for PWM.
 //
 // LQFP32 Pinout Diagram
 //             ----------
@@ -10,22 +15,22 @@
 //      VDDA -|5       28|- PB5
 //       PA0 -|6       27|- PB4
 //       PA1 -|7       26|- PB3  < L_REV (TIM2_CH2, AF2)
-// (R_FWD)PA2 -|8       25|- PA15 < L_FWD (TIM2_CH1, AF5)
-// (R_REV)PA3 -|9       24|- PA14
+//(USART2_TX)PA2 -|8  25|- PA15 < L_FWD (TIM2_CH1, AF5)
+//(USART2_RX)PA3 -|9  24|- PA14
 //       PA4 -|10      23|- PA13
 //       PA5 -|11      22|- PA12
-//       PA6 -|12      21|- PA11
-//       PA7 -|13      20|- PA10 (Reserved for RXD)
-//       PB0 -|14      19|- PA9  (Reserved for TXD)
+//(R_FWD)PA6 -|12      21|- PA11
+//(R_REV)PA7 -|13      20|- PA10 (Reserved for USART1_RXD)
+//       PB0 -|14      19|- PA9  (Reserved for USART1_TXD)
 //       PB1 -|15      18|- PA8
 //       VSS -|16      17|- VDD
 //             ----------
 //
 // Pin Summary:
-// Left Motor FWD  -> PA15 (Pin 25) [TIM2_CH1 / AF5]
-// Left Motor REV  -> PB3  (Pin 26) [TIM2_CH2 / AF2]
-// Right Motor FWD -> PA2  (Pin 8)  [TIM2_CH3 / AF2] - double check these pins
-// on the actual board! Right Motor REV -> PA3  (Pin 9)  [TIM2_CH4 / AF2]
+// Left  Motor FWD -> PA15 (Pin 25) [TIM2_CH1  / AF5]
+// Left  Motor REV -> PB3  (Pin 26) [TIM2_CH2  / AF2]
+// Right Motor FWD -> PA6  (Pin 12) [TIM22_CH1 / AF5]
+// Right Motor REV -> PA7  (Pin 13) [TIM22_CH2 / AF5]
 //
 // Hardware Notes for the team:
 // - We use 2 PWM signals per motor. Wire the FWD signal to the left half-bridge
@@ -51,69 +56,67 @@
 #define SYSCLK 32000000L
 
 void Motor_Init(void) {
-  RCC->IOPENR |= BIT0 | BIT1; // peripheral clock enable for port A and B
-  RCC->APB1ENR |= BIT0;       // turn on clock for timer2
+  RCC->IOPENR  |= BIT0 | BIT1; // port A + B clocks
+  RCC->APB1ENR |= BIT0;        // TIM2  clock (APB1 bit 0)
+  RCC->APB2ENR |= BIT5;        // TIM22 clock (APB2 bit 5)
 
-  // Configure PA15 for alternate function (TIM2_CH1, pin 25 in LQFP32 package)
-  // Copied from TimerPWM example, same pin same AF
-  GPIOA->OSPEEDR |= BIT30;                          // MEDIUM SPEED
-  GPIOA->OTYPER &= ~BIT15;                          // Push-pull
-  GPIOA->MODER = (GPIOA->MODER & ~(BIT30)) | BIT31; // AF-Mode
-  GPIOA->AFR[1] |= BIT30 | BIT28;                   // AF5 (table 16)
+  // ---- LEFT MOTOR: TIM2_CH1 (PA15, FWD) + TIM2_CH2 (PB3, REV) ----
 
-  // Configure PB3 for alternate function (TIM2_CH2)
-  GPIOB->OSPEEDR |= BIT6;
-  GPIOB->OTYPER &= ~BIT3;
-  GPIOB->MODER = (GPIOB->MODER & ~(BIT6)) | BIT7; // AF-Mode
-  GPIOB->AFR[0] |= BIT13;                         // AF2 (0010)
+  // PA15 = TIM2_CH1 AF5 (Left FWD)
+  GPIOA->OSPEEDR |= BIT30 | BIT31;              // medium speed (2 bits)
+  GPIOA->OTYPER  &= ~BIT15;                     // push-pull
+  GPIOA->MODER    = (GPIOA->MODER & ~BIT30) | BIT31; // AF mode
+  GPIOA->AFR[1]  |= BIT30 | BIT28;             // AF5 (0101)
 
-  // Configure PA2 for alternate function (TIM2_CH3)
-  GPIOA->OSPEEDR |= BIT4;
-  GPIOA->OTYPER &= ~BIT2;
-  GPIOA->MODER = (GPIOA->MODER & ~(BIT4)) | BIT5; // AF-Mode
-  GPIOA->AFR[0] |= BIT9;                          // AF2 (0010)
+  // PB3 = TIM2_CH2 AF2 (Left REV)
+  GPIOB->OSPEEDR |= BIT6 | BIT7;               // medium speed (2 bits)
+  GPIOB->OTYPER  &= ~BIT3;                      // push-pull
+  GPIOB->MODER    = (GPIOB->MODER & ~BIT6) | BIT7; // AF mode
+  GPIOB->AFR[0]  |= BIT13;                     // AF2 (0010)
 
-  // Configure PA3 for alternate function (TIM2_CH4)
-  GPIOA->OSPEEDR |= BIT6;
-  GPIOA->OTYPER &= ~BIT3;
-  GPIOA->MODER = (GPIOA->MODER & ~(BIT6)) | BIT7; // AF-Mode
-  GPIOA->AFR[0] |= BIT13;                         // AF2 (0010)
-
-  // Timer 2 setup
-  // We are using a prescaler of 319 to drop the PWM frequency down to ~1kHz.
-  // This is SUPER IMPORTANT. The LTV-847 optocouplers we're using take 5-10us
-  // to turn off. When we ran this at 20kHz earlier, they couldn't switch fast
-  // enough, causing shoot-through that fried the MOSFETs. Keep this at ~1kHz to
-  // be safe.
-  TIM2->PSC = 319;
-  TIM2->ARR = 100;   // period=100 so duty cycle maps cleanly from 0-100%
-  TIM2->CR1 |= BIT7; // auto-reload preload enable
-  TIM2->CR1 |= BIT0; // enable the counter
-
-  // Enable PWM mode 1 on all 4 channels ([6..4]=110, OC preload)
-  // We're upcounting now. CCR=0 means 0% duty cycle (OFF), CCR=100 means full
-  // speed.
-  TIM2->CCMR1 |= BIT6 | BIT5;   // CH1 PWM mode 1
+  // TIM2: CH1=PA15(FWD), CH2=PB3(REV) — same 1 kHz PWM
+  TIM2->PSC    = 319;
+  TIM2->ARR    = 100;
+  TIM2->CR1   |= BIT7;          // ARPE
+  TIM2->CCMR1 |= BIT6  | BIT5;  // CH1 PWM mode 1
   TIM2->CCMR1 |= BIT3;          // OC1PE
   TIM2->CCMR1 |= BIT14 | BIT13; // CH2 PWM mode 1
   TIM2->CCMR1 |= BIT11;         // OC2PE
-  TIM2->CCMR2 |= BIT6 | BIT5;   // CH3 PWM mode 1
-  TIM2->CCMR2 |= BIT3;          // OC3PE
-  TIM2->CCMR2 |= BIT14 | BIT13; // CH4 PWM mode 1
-  TIM2->CCMR2 |= BIT11;         // OC4PE
+  TIM2->CCER  |= BIT0 | BIT4;   // CC1E + CC2E
+  TIM2->CCR1   = 0;
+  TIM2->CCR2   = 0;
+  TIM2->EGR   |= BIT0;          // UG
+  TIM2->CR1   |= BIT0;          // CEN
 
-  // Enable output compare on all 4 channels
-  TIM2->CCER |= BIT0;  // CC1E
-  TIM2->CCER |= BIT4;  // CC2E
-  TIM2->CCER |= BIT8;  // CC3E
-  TIM2->CCER |= BIT12; // CC4E
+  // ---- RIGHT MOTOR: TIM22_CH1 (PA6, FWD) + TIM22_CH2 (PA7, REV) ----
+  // PA6/PA7 are confirmed TIM22_CH1/CH2 at AF5 in the STM32L051 datasheet.
+  // PB0/PB1 have NO timer support on STM32L051 — verified from HAL gpio_ex.h.
 
-  // Start with motors off
-  TIM2->CCR1 = 0;
-  TIM2->CCR2 = 0;
-  TIM2->CCR3 = 0;
-  TIM2->CCR4 = 0;
-  TIM2->EGR |= BIT0; // UG=1
+  // PA6 = TIM22_CH1 AF5 (Right FWD)
+  GPIOA->OSPEEDR |= BIT12 | BIT13;              // medium speed (2 bits for pin 6)
+  GPIOA->OTYPER  &= ~BIT6;                      // push-pull
+  GPIOA->MODER    = (GPIOA->MODER & ~(BIT12 | BIT13)) | BIT13; // AF mode
+  GPIOA->AFR[0]  |= BIT26 | BIT24;             // AF5 (0101) for pin 6
+
+  // PA7 = TIM22_CH2 AF5 (Right REV)
+  GPIOA->OSPEEDR |= BIT14 | BIT15;              // medium speed (2 bits for pin 7)
+  GPIOA->OTYPER  &= ~BIT7;                      // push-pull
+  GPIOA->MODER    = (GPIOA->MODER & ~(BIT14 | BIT15)) | BIT15; // AF mode
+  GPIOA->AFR[0]  |= BIT30 | BIT28;             // AF5 (0101) for pin 7
+
+  // TIM22: same 1 kHz PWM settings
+  TIM22->PSC    = 319;
+  TIM22->ARR    = 100;
+  TIM22->CR1   |= BIT7;          // ARPE
+  TIM22->CCMR1 |= BIT6  | BIT5;  // CH1 PWM mode 1
+  TIM22->CCMR1 |= BIT3;          // OC1PE
+  TIM22->CCMR1 |= BIT14 | BIT13; // CH2 PWM mode 1
+  TIM22->CCMR1 |= BIT11;         // OC2PE
+  TIM22->CCER  |= BIT0 | BIT4;   // CC1E + CC2E
+  TIM22->CCR1   = 0;
+  TIM22->CCR2   = 0;
+  TIM22->EGR   |= BIT0;          // UG
+  TIM22->CR1   |= BIT0;          // CEN
 }
 
 // speed: -100 to 100. Positive=forward, negative=reverse, 0=coast.
@@ -134,17 +137,15 @@ void Motor_Left(int speed) {
 }
 
 void Motor_Right(int speed) {
-  if (speed > 100)
-    speed = 100;
-  if (speed < -100)
-    speed = -100;
+  if (speed > 100)  speed = 100;
+  if (speed < -100) speed = -100;
 
   if (speed >= 0) {
-    TIM2->CCR3 = speed; // CH3 fwd
-    TIM2->CCR4 = 0;     // CH4 rev off
+    TIM22->CCR1 = speed; // CH1 = PA6 = Right FWD
+    TIM22->CCR2 = 0;
   } else {
-    TIM2->CCR3 = 0;
-    TIM2->CCR4 = -speed;
+    TIM22->CCR1 = 0;
+    TIM22->CCR2 = -speed; // CH2 = PA7 = Right REV
   }
 }
 
